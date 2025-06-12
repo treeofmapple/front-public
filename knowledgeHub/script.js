@@ -40,7 +40,8 @@ document.addEventListener('DOMContentLoaded', () => {
         publicNotes: [],
         tagSuggestions: [],
         selectedNoteName: null,
-        currentView: 'public', // Default view is now public notes
+        selectedPublicNote: null, // <-- ADDED: To store the selected public note
+        currentView: 'public',
     };
 
     async function apiCall(endpoint, method = 'GET', body = null, isMultipart = false, isRetry = false) {
@@ -191,10 +192,8 @@ document.addEventListener('DOMContentLoaded', () => {
         toggleViews();
         if (state.accessToken) {
             renderUserNotesList();
-            renderRightColumn();
-        } else {
-            renderPublicNotesList();
         }
+        renderRightColumn();
     }
 
     function toggleViews() {
@@ -263,12 +262,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const card = document.createElement('div');
             card.className = 'public-note-list-item cursor-pointer';
             
+            // --- MODIFIED: Click listener now fetches details ---
             card.addEventListener('click', () => {
-                showMessage(`(Placeholder) Viewing details for: ${note.name}`, 'info');
+                selectPublicNote(note.name);
             });
 
             const hasAnnotation = note.annotation && note.annotation.length > 0;
-            const hasAttachments = note.attachments && note.attachments.length > 0;
 
             card.innerHTML = `
                 <div class="image-wrapper">
@@ -276,12 +275,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
                 <div class="content-wrapper">
                     <div class="note-header">
-                        <h3 class="note-title">${note.name}</h3>
+                        <h3 class="note-title truncate">${note.name}</h3>
                         <div class="note-icons" title="${hasAnnotation ? 'Has annotation' : 'No annotation'}">
                             ${hasAnnotation ? '<i class="fa-solid fa-file-alt"></i>' : '<i class="fa-regular fa-file"></i>'}
                         </div>
                     </div>
-                    <p class="note-description">${note.description || 'No description provided.'}</p>
+                    <p class="note-description truncate">${note.description || 'No description provided.'}</p>
                     <div class="note-footer">
                         <span>Updated: ${formatDateTime(note.updatedAt)}</span>
                         <span>Created: ${formatDateTime(note.createdAt)}</span>
@@ -294,30 +293,81 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     function renderRightColumn() {
-        // Clear the column first
         rightColumn.innerHTML = '';
         
-        // Detach public notes section if it's already in the DOM but not in the right column
         if (publicNotesSection.parentElement !== rightColumn) {
             publicNotesSection.remove();
         }
 
-        if (state.currentView === 'create') {
+        if (state.currentView === 'create' && state.accessToken) {
             rightColumn.appendChild(createNoteTemplate.content.cloneNode(true));
             publicNotesSection.classList.add('hidden');
             attachCreateNoteFormListener();
-        } else if (state.currentView === 'edit') {
+        } else if (state.currentView === 'edit' && state.accessToken) {
             rightColumn.appendChild(editNoteTemplate.content.cloneNode(true));
             publicNotesSection.classList.add('hidden');
             populateAndAttachEditFormListener();
-        } else if (state.currentView === 'detail' && state.selectedNoteName) {
+        } else if (state.currentView === 'detail' && state.selectedNoteName && state.accessToken) {
             renderNoteDetail();
             publicNotesSection.classList.add('hidden');
-        } else { // Default to public notes view
+        // --- ADDED: Logic to show public note detail view ---
+        } else if (state.currentView === 'public-detail' && state.selectedPublicNote) {
+            renderPublicNoteDetail();
+            publicNotesSection.classList.add('hidden');
+        } else {
             publicNotesSection.classList.remove('hidden');
             rightColumn.appendChild(publicNotesSection);
             renderPublicNotesList();
         }
+    }
+
+    // --- ADDED: New function to render public note details ---
+    function renderPublicNoteDetail() {
+        const note = state.selectedPublicNote;
+        if (!note) {
+            state.currentView = 'public';
+            render();
+            return;
+        }
+
+        const tagsHtml = note.tags.map(tag => `<span class="tag-display-item">${tag.name}</span>`).join('');
+        const attachmentsHtml = note.attachments.map(a => `<div class="flex justify-between items-center text-sm p-2 bg-gray-800/50 rounded-md"><span>${a.name}</span></div>`).join('');
+
+        rightColumn.innerHTML = `
+            <div class="mb-4">
+                <button id="backToHomeBtn" class="btn btn-secondary text-sm"><i class="fa-solid fa-arrow-left mr-2"></i>Back</button>
+            </div>
+            <div class="flex justify-between items-start">
+                <h2 class="text-2xl font-bold mb-2 text-white break-all">${note.name}</h2>
+            </div>
+            <p class="text-gray-400 mb-4">${note.description || ''}</p>
+            <p class="text-gray-400 mb-4">Privacy: Public</p>
+            <div class="tags-display-container">
+                <h4 class="font-semibold text-white mb-2">Tags</h4>
+                ${note.tags && note.tags.length > 0 ? tagsHtml : '<p class="text-sm text-gray-500">No tags found.</p>'}
+            </div>
+            <div class="prose max-w-none bg-gray-900/50 p-4 rounded-md mt-4">
+                <h4 class="font-semibold text-white">Annotation</h4>
+                <p class="text-gray-300">${note.annotation ? note.annotation.replace(/\n/g, '<br>') : 'N/A'}</p>
+            </div>
+
+            ${note.image ? `
+            <div class="mt-6 border-t border-gray-700 pt-6">
+                <h3 class="text-lg font-semibold mb-4 text-white">Image</h3>
+                <img src="${note.image.objectUrl}" onerror="this.style.display='none'" alt="Note Image" class="w-full h-auto max-h-96 object-cover rounded-lg">
+            </div>` : ''}
+
+            <div class="mt-6 border-t border-gray-700 pt-6">
+                <h3 class="text-lg font-semibold mb-4 text-white">Attachments</h3>
+                <div class="space-y-2 mb-4">${attachmentsHtml || '<p class="text-sm text-gray-500">No attachments found.</p>'}</div>
+                ${note.attachments && note.attachments.length > 0 ? `<button id="downloadPublicAttachmentsBtn" data-note-name="${note.name}" class="btn btn-secondary text-sm px-4 py-2">Download All (.zip)</button>` : ''}
+            </div>`;
+        
+        document.getElementById('backToHomeBtn')?.addEventListener('click', () => {
+            state.currentView = 'public';
+            state.selectedPublicNote = null;
+            render();
+        });
     }
     
     function renderNoteDetail() {
@@ -572,26 +622,22 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!note) return;
         const form = document.getElementById('editNoteForm');
 
-        // Image handling elements
         const editNoteImageInput = form.querySelector('#editNoteImage');
         const editNoteImagePreviewContainer = form.querySelector('#editNoteImagePreview');
         const editImagePreview = form.querySelector('#editImagePreview');
         const removeEditImagePreviewBtn = form.querySelector('#removeEditImagePreview');
         
-        // Populate form fields
         form.querySelector('#editNoteTitle').value = note.name;
         form.querySelector('#editNoteDescription').value = note.description || '';
         form.querySelector('#editNoteAnnotation').value = note.annotation || '';
         form.querySelector('#editNotePublic').checked = note.notePrivated;
         form.querySelector('#manage-tags-btn').addEventListener('click', openTagModal);
 
-        // Populate existing image
         if (note.image && note.image.objectUrl) {
             editImagePreview.src = note.image.objectUrl;
             editNoteImagePreviewContainer.classList.remove('hidden');
         }
 
-        // Add event listeners for image management
         editNoteImageInput.addEventListener('change', () => {
             const file = editNoteImageInput.files[0];
             if (file) {
@@ -605,7 +651,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         removeEditImagePreviewBtn.addEventListener('click', () => {
-            editNoteImageInput.value = ''; // Clear the file input
+            editNoteImageInput.value = '';
             editImagePreview.src = '';
             editNoteImagePreviewContainer.classList.add('hidden');
         });
@@ -615,7 +661,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const btn = e.target.querySelector('button[type="submit"]');
             btn.disabled = true; btn.textContent = 'Saving...';
             try {
-                // 1. Update text-based details
                 const updatedData = {
                     description: form.querySelector('#editNoteDescription').value,
                     annotation: form.querySelector('#editNoteAnnotation').value,
@@ -623,7 +668,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 };
                 await apiCall(`/v1/notes/edit/${encodeURIComponent(note.name)}`, 'PUT', updatedData);
 
-                // 2. Upload new image if one was selected
                 const newImageFile = editNoteImageInput.files[0];
                 if (newImageFile) {
                     showMessage('Uploading new image...', 'info');
@@ -642,7 +686,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('cancelEditBtn').addEventListener('click', () => {
             selectNote(state.selectedNoteName);
         });
-        setupTextareaWithCounter('editAnnotationCounter', 'editAnnotationCounter', 50000);
+        setupTextareaWithCounter('editNoteAnnotation', 'editAnnotationCounter', 50000);
     }
 
     function attachNoteDetailListeners() {
@@ -701,6 +745,28 @@ document.addEventListener('DOMContentLoaded', () => {
             state.currentView = 'edit';
             render();
         });
+    }
+
+    // --- ADDED: New function to select a public note and fetch its details ---
+    async function selectPublicNote(noteName) {
+        state.currentView = 'public-detail';
+        state.selectedPublicNote = null; // Clear previous
+        render(); // Show loading state if any
+        try {
+            const noteData = await apiCall(`/v1/notes/search/public/name?name=${encodeURIComponent(noteName)}&page=0`);
+            const fullNote = noteData?.content?.[0];
+            if (fullNote) {
+                state.selectedPublicNote = fullNote;
+            } else {
+                showMessage(`Could not find details for note: ${noteName}`, 'error');
+                state.currentView = 'public';
+            }
+        } catch (error) {
+            showMessage('Could not load note details.', 'error');
+            state.currentView = 'public';
+        } finally {
+            render(); // Re-render with fetched data or back to public list
+        }
     }
     
     async function selectNote(noteName) {
@@ -770,6 +836,7 @@ document.addEventListener('DOMContentLoaded', () => {
     homeLink.addEventListener('click', () => {
         state.currentView = 'public';
         state.selectedNoteName = null;
+        state.selectedPublicNote = null;
         render();
     });
 
@@ -843,6 +910,34 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.body.addEventListener('click', async (e) => {
+        // --- MODIFIED: Split download button logic for private vs public notes ---
+        const handleDownload = async (noteName) => {
+            const btn = e.target;
+            const originalBtnContent = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin mr-2"></i>Downloading...`;
+        
+            try {
+                const blob = await apiCall(`/v1/attachment/download?name=${encodeURIComponent(noteName)}`);
+                if (blob && blob.size > 0) {
+                     const a = document.createElement('a');
+                     a.href = window.URL.createObjectURL(blob);
+                     a.download = `${noteName}_attachments.zip`;
+                     document.body.appendChild(a);
+                     a.click();
+                     a.remove();
+                     window.URL.revokeObjectURL(a.href);
+                } else {
+                    showMessage('No attachments to download or an error occurred.', 'info');
+                }
+            } catch(error) {
+                console.error("Download failed:", error);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalBtnContent;
+            }
+        };
+
         if (e.target.dataset.noteNameDelete) {
             if (confirm(`Are you sure you want to delete the note "${e.target.dataset.noteNameDelete}"?`)) {
                 await apiCall(`/v1/notes/delete?name=${encodeURIComponent(e.target.dataset.noteNameDelete)}`, 'DELETE');
@@ -863,29 +958,11 @@ document.addEventListener('DOMContentLoaded', () => {
              }
         }
         else if (e.target.id === 'downloadAttachmentsBtn' && state.selectedNoteName) {
-            const downloadBtn = e.target;
-            const originalBtnContent = downloadBtn.innerHTML;
-            downloadBtn.disabled = true;
-            downloadBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin mr-2"></i>Downloading...`;
-        
-            try {
-                const blob = await apiCall(`/v1/attachment/download?name=${encodeURIComponent(state.selectedNoteName)}`);
-                if (blob && blob.size > 0) {
-                     const a = document.createElement('a');
-                     a.href = window.URL.createObjectURL(blob);
-                     a.download = `${state.selectedNoteName}_attachments.zip`;
-                     document.body.appendChild(a);
-                     a.click();
-                     a.remove();
-                     window.URL.revokeObjectURL(a.href);
-                } else {
-                    showMessage('No attachments to download or an error occurred.', 'info');
-                }
-            } catch(error) {
-                console.error("Download failed:", error);
-            } finally {
-                downloadBtn.disabled = false;
-                downloadBtn.innerHTML = originalBtnContent;
+            await handleDownload(state.selectedNoteName);
+        } else if (e.target.id === 'downloadPublicAttachmentsBtn') {
+            const noteName = e.target.dataset.noteName;
+            if (noteName) {
+                await handleDownload(noteName);
             }
         }
     });
